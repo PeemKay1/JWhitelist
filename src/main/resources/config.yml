@@ -33,5 +33,3 @@ messages:
   unknown_subcommand: "Unknown subcommand: %subcommand%"
   player_info: "&a%player%'s whitelist info:\n&aTime Left: %time%\n&aLast Login: %last_login%"
   no_player_info: "&cNo whitelist information found for %player%."
-
-

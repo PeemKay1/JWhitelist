@@ -18,6 +18,11 @@ public class JWhitelistListener implements Listener {
 
     @EventHandler
     public void onPlayerPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) return;
+        if (!plugin.isDatabaseReady()) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_WHITELIST, plugin.getKickMessage());
+            return;
+        }
         if (databaseManager.isPlayerWhitelisted(event.getName())) {
             databaseManager.updateLastLogin(event.getName());
         } else {
@@ -28,8 +33,9 @@ public class JWhitelistListener implements Listener {
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event){
         Player player = event.getPlayer();
+        if (!plugin.isLuckPermsEnabled()) return;
         if (!player.hasPlayedBefore() || !player.hasPermission("group." + plugin.getGroup())) {
-            LuckPermsApi.addGroupPermission(player.getName());
+            LuckPermsApi.addGroupPermission(player.getUniqueId());
         }
     }
 }

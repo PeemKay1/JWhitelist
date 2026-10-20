@@ -3,62 +3,35 @@ package jcn.jwl;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.node.types.InheritanceNode;
 import org.bukkit.Bukkit;
-import org.bukkit.OfflinePlayer;
-
 import java.util.UUID;
 
-public class LuckPermsApi {
-    private static LuckPerms api;
-    private static JWhitelist plugin;
-    private static boolean isInit;
-
-    public static void init(LuckPerms api, JWhitelist plugin){
-        LuckPermsApi.api = api;
-        LuckPermsApi.plugin = plugin;
-        isInit = true;
+public final class LuckPermsApi {
+    private static volatile LuckPerms api;
+    private static volatile JWhitelist plugin;
+    public static void initialize(JWhitelist owner) {
+        var provider = Bukkit.getServicesManager().getRegistration(LuckPerms.class);
+        if (provider != null) init(provider.getProvider(), owner);
+        else owner.getLogger().warning("LuckPerms unavailable; group integration disabled.");
     }
-
-    public static void removeGroupPermission(String playerName){
-        if (!isInit) return;
-        String group = plugin.getGroup();
-
-        OfflinePlayer player = Bukkit.getOfflinePlayer(playerName);
-        UUID playerUUID = player.getUniqueId();
-
-        api.getUserManager().loadUser(playerUUID).thenAcceptAsync(user -> {
-            if (user != null) {
-                System.out.println(user.getUsername());
-                InheritanceNode node = InheritanceNode.builder(group).build();
-                user.data().remove(node);
-                api.getUserManager().saveUser(user);
-            } else {
-                plugin.getLogger().severe("Error: User not found.");
-            }
-        }).exceptionally(ex -> {
-            plugin.getLogger().severe("Error loading user: " + ex.getMessage());
-            return null;
-        });
+    public static void init(LuckPerms service, JWhitelist owner) { plugin = owner; api = service; }
+    public static void reset() { api = null; plugin = null; }
+    public static void addGroupPermission(UUID uuid) { update(uuid, true); }
+    public static void addGroupPermission(String name) { lookup(name, true); }
+    public static void removeGroupPermission(String name) { lookup(name, false); }
+    private static void lookup(String name, boolean add) {
+        LuckPerms service = api;
+        if (service == null) return;
+        service.getUserManager().lookupUniqueId(name).thenAccept(uuid -> { if (uuid != null) update(uuid, add); });
     }
-
-    public static void addGroupPermission(String playerName) {
-        if (!isInit) return;
-        String group = plugin.getGroup();
-
-        OfflinePlayer player = Bukkit.getOfflinePlayer(playerName);
-        UUID playerUUID = player.getUniqueId();
-
-        api.getUserManager().loadUser(playerUUID).thenAcceptAsync(user -> {
-            if (user != null) {
-                System.out.println(user.getUsername());
-                InheritanceNode node = InheritanceNode.builder(group).build();
-                user.data().add(node);
-                api.getUserManager().saveUser(user);
-            } else {
-                plugin.getLogger().severe("Error: User not found.");
-            }
-        }).exceptionally(ex -> {
-            plugin.getLogger().severe("Error loading user: " + ex.getMessage());
-            return null;
-        });
+    private static void update(UUID uuid, boolean add) {
+        LuckPerms service = api;
+        JWhitelist owner = plugin;
+        if (service == null || owner == null || !owner.isLuckPermsEnabled()) return;
+        String group = owner.getGroup();
+        if (group == null || group.equalsIgnoreCase("none") || group.isBlank()) return;
+        service.getUserManager().modifyUser(uuid, user -> {
+            var node = InheritanceNode.builder(group).build();
+            if (add) user.data().add(node); else user.data().remove(node);
+        }).exceptionally(error -> { owner.getLogger().warning("LuckPerms update failed: " + error.getMessage()); return null; });
     }
 }

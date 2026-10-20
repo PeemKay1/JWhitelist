@@ -1,5 +1,5 @@
 name: JWhitelist
-version: '1.0-SNAPSHOT'
+version: ${project.version}
 main: jcn.jwl.JWhitelist
 api-version: '1.21'
 commands:
@@ -7,3 +7,5 @@ commands:
     aliases: jwl
     description: Manage the whitelist.
     usage: /jwhitelist add/remove/reload <player> [duration]
+folia-supported: true
+softdepend: [LuckPerms]

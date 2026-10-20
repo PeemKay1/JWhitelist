@@ -15,7 +15,7 @@ public class JWhitelistDatabase {
         this.plugin = plugin;
     }
 
-    public void setupDatabase() {
+    public synchronized void setupDatabase() {
         try {
             String dbType = plugin.getConfig().getString("database.type", "sqlite");
             if ("mysql".equalsIgnoreCase(dbType)) {
@@ -25,7 +25,7 @@ public class JWhitelistDatabase {
             }
             createTables();
         } catch (SQLException e) {
-            plugin.getLogger().log(Level.SEVERE, "Could not setup database", e);
+            throw new IllegalStateException("Could not setup database", e);
         }
     }
 
@@ -55,7 +55,7 @@ public class JWhitelistDatabase {
         }
     }
 
-    public void closeDatabase() {
+    public synchronized void closeDatabase() {
         if (connection != null) {
             try {
                 connection.close();
@@ -65,30 +65,33 @@ public class JWhitelistDatabase {
         }
     }
 
-    public void addPlayerToWhitelist(String playerName, long expiry) {
+    public synchronized void addPlayerToWhitelist(String playerName, long expiry) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
         try (PreparedStatement stmt = connection.prepareStatement(
                 "REPLACE INTO whitelist (name, expiry, last_login) VALUES (?, ?, ?)")) {
             stmt.setString(1, playerName);
-            stmt.setLong(2, expiry == -1 ? -1 : System.currentTimeMillis() + expiry);
+            stmt.setLong(2, expiry == -1 ? -1 : Math.addExact(System.currentTimeMillis(), expiry));
             stmt.setLong(3, System.currentTimeMillis());
             stmt.executeUpdate();
         } catch (SQLException e) {
-            plugin.getLogger().log(Level.SEVERE, "Could not add player to whitelist", e);
+            throw new IllegalStateException("Could not add player to whitelist", e);
         }
     }
 
-    public void removePlayerFromWhitelist(String playerName) {
-        try (PreparedStatement stmt = connection.prepareStatement("DELETE FROM whitelist WHERE name = ?")) {
+    public synchronized void removePlayerFromWhitelist(String playerName) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
+        try (PreparedStatement stmt = connection.prepareStatement("DELETE FROM whitelist WHERE LOWER(name) = ?")) {
             stmt.setString(1, playerName);
             stmt.executeUpdate();
         } catch (SQLException e) {
-            plugin.getLogger().log(Level.SEVERE, "Could not remove player from whitelist", e);
+            throw new IllegalStateException("Could not remove player from whitelist", e);
         }
-        LuckPermsApi.removeGroupPermission(playerName);
+        if (plugin.isLuckPermsEnabled()) LuckPermsApi.removeGroupPermission(playerName);
     }
 
-    public boolean isPlayerWhitelisted(String playerName) {
-        try (PreparedStatement stmt = connection.prepareStatement("SELECT expiry FROM whitelist WHERE name = ?")) {
+    public synchronized boolean isPlayerWhitelisted(String playerName) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
+        try (PreparedStatement stmt = connection.prepareStatement("SELECT expiry FROM whitelist WHERE LOWER(name) = ?")) {
             stmt.setString(1, playerName);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
@@ -102,9 +105,10 @@ public class JWhitelistDatabase {
         return false;
     }
 
-    public void updateLastLogin(String playerName) {
+    public synchronized void updateLastLogin(String playerName) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
         try (PreparedStatement stmt = connection.prepareStatement(
-                "UPDATE whitelist SET last_login = ? WHERE name = ?")) {
+                "UPDATE whitelist SET last_login = ? WHERE LOWER(name) = ?")) {
             stmt.setLong(1, System.currentTimeMillis());
             stmt.setString(2, playerName);
             stmt.executeUpdate();
@@ -113,7 +117,7 @@ public class JWhitelistDatabase {
         }
     }
 
-    public void cleanupWhitelist() {
+    public synchronized void cleanupWhitelist() {
         long currentTime = System.currentTimeMillis();
         try (PreparedStatement stmt = connection.prepareStatement("DELETE FROM whitelist WHERE expiry != -1 AND expiry <= ?")) {
             stmt.setLong(1, currentTime);
@@ -123,7 +127,7 @@ public class JWhitelistDatabase {
         }
     }
 
-    public List<String> getPlayersToRemove(long clearDuration) {
+    public synchronized List<String> getPlayersToRemove(long clearDuration) {
         List<String> playersToRemove = new ArrayList<>();
         long cutoffTime = System.currentTimeMillis() - clearDuration;
         try (PreparedStatement stmt = connection.prepareStatement(
@@ -140,7 +144,7 @@ public class JWhitelistDatabase {
         return playersToRemove;
     }
 
-    public Map<String, Long> getAllWhitelistedPlayers() {
+    public synchronized Map<String, Long> getAllWhitelistedPlayers() {
         Map<String, Long> whitelistedPlayers = new HashMap<>();
         long currentTime = System.currentTimeMillis();
 
@@ -168,7 +172,7 @@ public class JWhitelistDatabase {
         return whitelistedPlayers;
     }
 
-    public List<String> getAllPlayerNameInWhitelist() {
+    public synchronized List<String> getAllPlayerNameInWhitelist() {
         List<String> whitelistedPlayersName = new ArrayList<>();
         String query = "SELECT name FROM whitelist";
         try (Statement stmt = connection.createStatement();
@@ -182,18 +186,19 @@ public class JWhitelistDatabase {
         return whitelistedPlayersName;
     }
 
-    public long getTimeLeftInWhitelist(String playerName) {
+    public synchronized long getTimeLeftInWhitelist(String playerName) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
         long currentTime = System.currentTimeMillis();
         long timeLeft = 0;
 
-        String query = "SELECT expiry FROM whitelist WHERE name = ?";
+        String query = "SELECT expiry FROM whitelist WHERE LOWER(name) = ?";
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
             stmt.setString(1, playerName);
             try (ResultSet rs = stmt.executeQuery()) {
                 if (rs.next()) {
                     long expiry = rs.getLong("expiry");
                     if (expiry == -1) timeLeft = -1L;
-                    else if (expiry < -1) timeLeft = -2L;
+                    else if (expiry <= currentTime) timeLeft = -2L;
                     else timeLeft = expiry - currentTime;
                 }
                 else {
@@ -206,9 +211,10 @@ public class JWhitelistDatabase {
         return timeLeft;
     }
 
-    public long getLastLoginTime(String playerName) {
+    public synchronized long getLastLoginTime(String playerName) {
+        playerName = playerName.toLowerCase(java.util.Locale.ROOT);
         long lastLogin = -1;
-        String query = "SELECT last_login FROM whitelist WHERE name = ?";
+        String query = "SELECT last_login FROM whitelist WHERE LOWER(name) = ?";
         try (PreparedStatement stmt = connection.prepareStatement(query)) {
             stmt.setString(1, playerName);
             try (ResultSet rs = stmt.executeQuery()) {
